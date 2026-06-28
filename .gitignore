@@ -1,0 +1,3 @@
+# Tool-local Python venv and bytecode cache for embed.py — never committed.
+.venv/
+__pycache__/
