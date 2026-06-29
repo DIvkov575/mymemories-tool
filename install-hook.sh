@@ -39,18 +39,21 @@ except (FileNotFoundError, ValueError):
 hooks = cfg.setdefault("hooks", {})
 groups = hooks.setdefault("SessionStart", [])
 
-# Already registered? (match by command substring, any matcher)
-already = any(
-    h.get("command") == hook_cmd
-    for g in groups for h in g.get("hooks", [])
-)
-if already:
+# Identify our hook by the script basename, NOT the full path — a clone at a
+# different path (other machine, $HOME vs absolute) is the SAME hook and must
+# not produce a duplicate. Rewrite any existing entry to this machine's path.
+def is_ours(cmd): return cmd.rstrip("/").endswith("/session-start.sh")
+
+ours = [g for g in groups if any(is_ours(h.get("command","")) for h in g.get("hooks", []))]
+others = [g for g in groups if g not in ours]
+
+canonical = {"matcher": "startup",
+             "hooks": [{"type": "command", "command": hook_cmd}]}
+
+if len(ours) == 1 and ours[0] == canonical:
     print("hook already registered; no change")
 else:
-    groups.append({
-        "matcher": "startup",
-        "hooks": [{"type": "command", "command": hook_cmd}],
-    })
+    cfg["hooks"]["SessionStart"] = others + [canonical]   # dedupe + point here
     with open(settings_path, "w") as f:
         json.dump(cfg, f, indent=2)
     print(f"registered SessionStart hook -> {hook_cmd}")
