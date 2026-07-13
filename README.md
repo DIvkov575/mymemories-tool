@@ -5,8 +5,13 @@ per-project memory** backed by one central git repo. This is the **public
 tooling**; your actual memories live in a separate **private** repo that this
 tool reads and writes.
 
-It does exactly two things — **central sync** and **lazy load** — and nothing
-else. No semantic index, no link linter, no cross-partition registry.
+The core does exactly two things — **central sync** and **lazy load** — and
+nothing else. No semantic index, no link linter, no cross-partition registry.
+
+An optional add-on, **Dream** (`dream.py`, see [DREAM.md](DREAM.md)), does
+autonomous overnight consolidation: a nightly pass reflects on session
+transcripts and curates each partition (add / update / supersede / merge) on its
+own. Opt-in — install with `./install-dream.sh` or ignore it entirely.
 
 ## What it does
 
@@ -45,6 +50,12 @@ autolink.sh                ensure one project is partitioned + symlinked
 hooks/session-start.sh     SessionStart hook -> autolink + git pull --ff-only
 commands/memorize.md       /memorize (copied to ~/.claude/commands/)
 format.md                  compressed/technical memory format convention
+
+# optional: autonomous consolidation (see DREAM.md)
+dream.py                   the two-pass propose/apply consolidator
+hooks/dream-cron.sh        cron entry point (locking + logging)
+install-dream.sh           install / remove the nightly cron job
+DREAM.md                   method, guards, tuning, recovery
 ```
 
 ## Install on a new device
