@@ -1,9 +1,12 @@
 # mymemories-tool
 
 A small, self-contained toolkit that gives **Claude Code agents persistent,
-per-project memory** backed by a git repo — with cross-project recall and
-offline semantic search. This is the **public tooling**; your actual memories
-live in a separate **private** repo that this tool reads and writes.
+per-project memory** backed by one central git repo. This is the **public
+tooling**; your actual memories live in a separate **private** repo that this
+tool reads and writes.
+
+It does exactly two things — **central sync** and **lazy load** — and nothing
+else. No semantic index, no link linter, no cross-partition registry.
 
 ## What it does
 
@@ -12,22 +15,21 @@ one silo per project, with no central location and no version control. This tool
 inverts that: all memories live in one private git repo, and each project's
 partition is *symlinked* back into the path the harness loads from.
 
-- **Partitioned auto-load** — opening project X loads only partition X (the
-  harness follows the symlink; it can't tell it isn't a real dir).
-- **Centralized + versioned** — every partition is a subdir of one private repo.
-- **Cross-project on demand** — any session can `Read`/`grep` another partition;
-  `REGISTRY.md` lists them so the agent knows they exist.
-- **Auto-symlink** — a SessionStart hook links a project the first time it's
+- **Central sync** — every partition is a subdir of one private git repo. The
+  SessionStart hook pulls it down (`git pull --ff-only`, backgrounded); `/memorize`
+  commits and pushes it up. Same memories on every device.
+- **Lazy load** — opening project X symlinks in partition X, and the harness
+  auto-loads only that partition's `MEMORY.md` index. Leaf facts are read on
+  demand; other projects' partitions aren't loaded at all (but stay `Read`/`grep`-able).
+- **Auto-symlink** — the SessionStart hook links a project the first time it's
   opened with memories, so new projects need no manual step.
-- **Semantic recall** — an offline embedding index (`/recall`) finds memories by
-  meaning across all partitions. No API, no network: `fastembed` (ONNX) locally.
 
 ## Tool vs. memories — the split
 
 | | repo | visibility | holds |
 |---|---|---|---|
-| **Tool** | `mymemories-tool` (this) | public | scripts, hook, commands — zero personal data |
-| **Memories** | `mymemories` | private | your partitions, `manifest.tsv`, `index.json` |
+| **Tool** | `mymemories-tool` (this) | public | scripts, hook, command — zero personal data |
+| **Memories** | `mymemories` | private | your partitions + `manifest.tsv` |
 
 Every script resolves two locations:
 - `TOOL_DIR` — where the script lives (self-located; clone anywhere).
@@ -38,14 +40,10 @@ Every script resolves two locations:
 
 ```
 install.sh / uninstall.sh  create / remove the partition symlinks
-install-hook.sh            register SessionStart hook + install slash-commands
-setup.sh                   create .venv + install fastembed (for /recall)
-embed.py                   build/query the offline semantic index
+install-hook.sh            register SessionStart hook + install /memorize command
 autolink.sh                ensure one project is partitioned + symlinked
-hooks/session-start.sh     SessionStart hook -> autolink.sh for the cwd
-gen-registry.sh            regenerate REGISTRY.md + awareness headers
-lint.sh                    resolve [[wiki-links]]; report dangling links + orphans
-commands/*.md              /memorize + /recall (copied to ~/.claude/commands/)
+hooks/session-start.sh     SessionStart hook -> autolink + git pull --ff-only
+commands/memorize.md       /memorize (copied to ~/.claude/commands/)
 format.md                  compressed/technical memory format convention
 ```
 
@@ -60,9 +58,7 @@ git clone https://github.com/DIvkov575/mymemories-tool ~/workplace/mymemories-to
 cd ~/workplace/mymemories-tool
 
 ./install.sh         # symlink partitions into ~/.claude/projects
-./install-hook.sh    # register SessionStart hook + install /memorize, /recall
-./setup.sh           # create .venv + install fastembed
-python3 embed.py update   # build the embedding index (downloads ~130MB model once)
+./install-hook.sh    # register SessionStart hook + install /memorize
 ```
 
 If your memories repo is somewhere else, set `MEM_HOME` (e.g.
@@ -74,17 +70,14 @@ scripts.
 1. In the memories repo: `mkdir <partition>` and add memory `.md` files (one
    fact each, with a `name:` slug in frontmatter — see `format.md`).
 2. Add a line to `<MEM_HOME>/manifest.tsv`: `<partition><TAB><path-relative-to-$HOME>`.
-3. From the tool: `./gen-registry.sh && ./install.sh && ./lint.sh`
-4. `python3 embed.py update`, then commit + push the memories repo.
+3. From the tool: `./install.sh`, then commit + push the memories repo.
 
 Or just open the project and let the SessionStart hook auto-link it (if it
 already has memories), then `/memorize`.
 
 ## Conventions
 
-- **One fact per file.** Frontmatter `name:` is the slug; link with `[[slug]]`.
-- **Typed links** (optional): `[[supersedes:slug]]`, `[[pivoted-to:slug]]`,
-  `[[because:slug]]`. `lint.sh` resolves the slug after the last `:`.
+- **One fact per file.** Frontmatter `name:` is the slug (see `format.md`).
 - **Write liberally; load lazily.** Only `MEMORY.md` indexes auto-load. Leaf
-  facts are read on demand. Use `superseded-by` instead of deleting duplicates.
+  facts are read on demand. Overwrite/delete stale files — don't accumulate cruft.
 - `cozempic_digest.md` is plugin-managed and gitignored — never a real memory.

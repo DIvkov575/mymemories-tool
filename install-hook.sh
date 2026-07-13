@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Register the SessionStart hook that auto-symlinks projects on session start,
-# and install the /memorize + /recall slash-commands into ~/.claude/commands/.
+# Register the SessionStart hook (autolink + pull-down sync) and install the
+# /memorize slash-command into ~/.claude/commands/.
 # Idempotent: merges into ~/.claude/settings.json without clobbering other keys,
 # and is a no-op if the hook is already present. Run once per device.
 #
@@ -18,12 +18,14 @@ HOOK_CMD="$TOOL_DIR/hooks/session-start.sh"
 # Install slash-commands (copy, not symlink — Claude Code reads them directly).
 CMD_DIR="$CLAUDE_HOME/commands"
 mkdir -p "$CMD_DIR"
-for c in memorize recall; do
+for c in memorize; do
   if [ -f "$TOOL_DIR/commands/$c.md" ]; then
     cp "$TOOL_DIR/commands/$c.md" "$CMD_DIR/$c.md"
     echo "installed /$c command"
   fi
 done
+# Remove the /recall command left by earlier (semantic-search) installs.
+[ -f "$CMD_DIR/recall.md" ] && rm -f "$CMD_DIR/recall.md" && echo "removed stale /recall command"
 
 python3 - "$SETTINGS" "$HOOK_CMD" <<'PY'
 import json, os, sys
