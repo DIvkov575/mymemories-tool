@@ -9,9 +9,10 @@ The core does exactly two things — **central sync** and **lazy load** — and
 nothing else. No semantic index, no link linter, no cross-partition registry.
 
 An optional add-on, **Dream** (`dream.py`, see [DREAM.md](DREAM.md)), does
-autonomous overnight consolidation: a nightly pass reflects on session
-transcripts and curates each partition (add / update / supersede / merge) on its
-own. Opt-in — install with `./install-dream.sh` or ignore it entirely.
+hand-invoked consolidation: when you run it, it reflects on session transcripts
+and curates a partition (add / update / supersede / merge). It's deliberately
+non-forcing — most runs save little or nothing. Run `python3 dream.py --dry-run`
+or ignore it entirely.
 
 ## What it does
 
@@ -51,10 +52,8 @@ hooks/session-start.sh     SessionStart hook -> autolink + git pull --ff-only
 commands/memorize.md       /memorize (copied to ~/.claude/commands/)
 format.md                  compressed/technical memory format convention
 
-# optional: autonomous consolidation (see DREAM.md)
+# optional: hand-invoked consolidation (see DREAM.md)
 dream.py                   the two-pass propose/apply consolidator
-hooks/dream-cron.sh        cron entry point (locking + logging)
-install-dream.sh           install / remove the nightly cron job
 DREAM.md                   method, guards, tuning, recovery
 ```
 
