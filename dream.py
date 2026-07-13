@@ -37,21 +37,36 @@ Usage:
   dream.py --dry-run            # PROPOSE only; print ops, write nothing
   dream.py --since 2026-07-01   # override the per-partition last-run watermark
 
+Engines:
+  This runs against either Claude Code or Codex transcripts, selected with
+  DREAM_ENGINE (default "claude"). Both are the same two-pass design; only the
+  transcript source and the headless model invocation differ:
+    - claude: reads ~/.claude/projects/<mangled-path>/*.jsonl, proposes via
+      `claude -p ... --output-format json`.
+    - codex:  reads ~/.codex/sessions/**/*.jsonl (each rollout self-declares its
+      `cwd`, so partitions are matched by cwd, not a per-project dir), proposes
+      via `codex exec ... --output-last-message`.
+
 Env:
   MEM_HOME       private memories repo (default ~/workplace/mymemories)
+  DREAM_ENGINE   "claude" (default) or "codex" — transcript source + model backend
   CLAUDE_HOME    Claude Code home (default ~/.claude) — for transcript lookup
-  DREAM_MODEL    model alias for `claude -p` (default "sonnet")
+  CODEX_HOME     Codex home (default ~/.codex) — for rollout lookup
+  DREAM_MODEL    model for the headless propose call. Default depends on engine:
+                 "sonnet" for claude, "openai.gpt-5.4" for codex.
   DREAM_MAX_DESTRUCTIVE  per-run cap on SUPERSEDE+MERGE per partition (default 2)
   DREAM_IMPORTANCE_FLOOR  drop ADDs below this importance 1-10 (default 6; higher = stricter)
   DREAM_CORPUS_CHARS     cap on corpus chars per partition (default 80000)
   DREAM_NO_PUSH  if set, commit but do not `git push`
 """
-import sys, os, json, re, glob, subprocess, argparse, datetime
+import sys, os, json, re, glob, subprocess, argparse, datetime, tempfile
 
 HOME = os.path.expanduser("~")
 MEM_HOME = os.environ.get("MEM_HOME", os.path.join(HOME, "workplace", "mymemories"))
 CLAUDE_HOME = os.environ.get("CLAUDE_HOME", os.path.join(HOME, ".claude"))
-MODEL = os.environ.get("DREAM_MODEL", "sonnet")
+CODEX_HOME = os.environ.get("CODEX_HOME", os.path.join(HOME, ".codex"))
+ENGINE = os.environ.get("DREAM_ENGINE", "claude").lower()
+MODEL = os.environ.get("DREAM_MODEL") or ("openai.gpt-5.4" if ENGINE == "codex" else "sonnet")
 # Non-forcing defaults: high bar to save, low ceiling on destructive edits.
 MAX_DESTRUCTIVE = int(os.environ.get("DREAM_MAX_DESTRUCTIVE", "2"))
 IMPORTANCE_FLOOR = int(os.environ.get("DREAM_IMPORTANCE_FLOOR", "6"))
@@ -115,7 +130,8 @@ def safe_slug(slug):
 # corpus assembly (the reflection input)
 # ---------------------------------------------------------------------------
 def extract_transcript_text(path):
-    """Pull just the user/assistant natural-language turns from a .jsonl transcript."""
+    """Pull just the user/assistant natural-language turns from a Claude Code
+    .jsonl transcript (records shaped {message: {role, content}})."""
     out = []
     try:
         with open(path, encoding="utf-8") as f:
@@ -141,9 +157,66 @@ def extract_transcript_text(path):
     return "\n".join(out), sid
 
 
+def extract_codex_rollout(path):
+    """Pull the user/assistant turns + declared cwd from a Codex rollout .jsonl.
+
+    Codex records differ from Claude's: the working dir lives in a `session_meta`
+    record's payload.cwd, and turns are `response_item` records whose payload is a
+    `message` with role user/assistant and content blocks of type input_text
+    (user) / output_text (assistant). Returns (text, session_id, cwd)."""
+    out, sid, cwd = [], None, None
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                typ = obj.get("type")
+                p = obj.get("payload") or {}
+                if typ == "session_meta":
+                    sid = sid or p.get("session_id") or p.get("id")
+                    cwd = cwd or p.get("cwd")
+                elif typ == "response_item" and p.get("type") == "message":
+                    role = p.get("role")
+                    if role not in ("user", "assistant"):
+                        continue
+                    for b in p.get("content", []):
+                        if isinstance(b, dict) and b.get("type") in ("input_text", "output_text"):
+                            out.append(f"{role.upper()}: {b.get('text', '')}")
+    except OSError:
+        return "", None, None
+    if not sid:
+        sid = os.path.splitext(os.path.basename(path))[0]
+    return "\n".join(out), sid, cwd
+
+
+def _codex_files_for(project_abs):
+    """All Codex rollouts whose declared cwd is (under) project_abs, newest first.
+    Codex sessions aren't stored per-project, so we read each rollout's cwd and
+    filter — returning (path, session_id, text) tuples ready for the corpus."""
+    root = os.path.join(CODEX_HOME, "sessions")
+    target = os.path.normpath(project_abs)
+    hits = []
+    for p in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        text, sid, cwd = extract_codex_rollout(p)
+        if not cwd or not text.strip():
+            continue
+        c = os.path.normpath(cwd)
+        if c == target or c.startswith(target + os.sep):
+            hits.append((p, sid, text))
+    hits.sort(key=lambda t: os.path.getmtime(t[0]), reverse=True)
+    return hits
+
+
 def assemble_corpus(project_abs, since_ts):
     """Concatenate conversational text from transcripts modified since `since_ts`,
-    newest first, capped at CORPUS_CHARS. Returns (corpus_text, [session_ids])."""
+    newest first, capped at CORPUS_CHARS. Returns (corpus_text, [session_ids]).
+
+    Engine-aware: Claude reads a per-project transcript dir; Codex scans all
+    rollouts and matches on each session's declared cwd."""
+    if ENGINE == "codex":
+        return _assemble_corpus_codex(project_abs, since_ts)
     tdir = os.path.join(CLAUDE_HOME, "projects", mangle(project_abs))
     files = sorted(glob.glob(os.path.join(tdir, "*.jsonl")),
                    key=os.path.getmtime, reverse=True)
@@ -153,6 +226,24 @@ def assemble_corpus(project_abs, since_ts):
             continue
         text, sid = extract_transcript_text(p)
         if not text.strip():
+            continue
+        header = f"\n===== SESSION {sid} =====\n"
+        piece = header + text
+        if total + len(piece) > CORPUS_CHARS:
+            piece = piece[: max(0, CORPUS_CHARS - total)]
+        chunks.append(piece)
+        sids.append(sid)
+        total += len(piece)
+        if total >= CORPUS_CHARS:
+            break
+    return "".join(chunks), sids
+
+
+def _assemble_corpus_codex(project_abs, since_ts):
+    """Codex variant of assemble_corpus: matches rollouts by declared cwd."""
+    chunks, sids, total = [], [], 0
+    for p, sid, text in _codex_files_for(project_abs):
+        if since_ts and os.path.getmtime(p) <= since_ts:
             continue
         header = f"\n===== SESSION {sid} =====\n"
         piece = header + text
@@ -284,6 +375,12 @@ def render_existing(facts):
 def propose(partition, facts, corpus):
     prompt = PROMPT.format(partition=partition, existing=render_existing(facts),
                            corpus=corpus or "(no new transcripts)", floor=IMPORTANCE_FLOOR)
+    if ENGINE == "codex":
+        return _propose_codex(prompt)
+    return _propose_claude(prompt)
+
+
+def _propose_claude(prompt):
     try:
         proc = subprocess.run(
             ["claude", "-p", prompt, "--output-format", "json", "--model", MODEL],
@@ -303,6 +400,40 @@ def propose(partition, facts, corpus):
         result = env.get("result", raw) if isinstance(env, dict) else raw
     except ValueError:
         result = raw
+    return parse_ops(result)
+
+
+def _propose_codex(prompt):
+    # `codex exec -o FILE` writes ONLY the final message to FILE — no envelope to
+    # unwrap. Read-only sandbox + a temp CWD keep the propose pass incapable of
+    # touching the filesystem: the apply pass is the only thing that writes, which
+    # is the safety separation the whole design rests on.
+    out_path = tempfile.mktemp(suffix=".dream.txt")
+    try:
+        proc = subprocess.run(
+            ["codex", "exec", "--skip-git-repo-check", "--color", "never",
+             "--sandbox", "read-only", "-m", MODEL,
+             "-o", out_path, prompt],
+            capture_output=True, text=True, timeout=900,
+            cwd=tempfile.gettempdir(),
+            env={**os.environ, "CODEX_HOME": CODEX_HOME},
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        log(f"  propose FAILED ({e.__class__.__name__}); skipping partition")
+        return []
+    if proc.returncode != 0:
+        log(f"  codex exec exit {proc.returncode}: {(proc.stderr or '')[:200]}")
+        return []
+    try:
+        with open(out_path, encoding="utf-8") as f:
+            result = f.read()
+    except OSError:
+        result = proc.stdout
+    finally:
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
     return parse_ops(result)
 
 
@@ -517,6 +648,9 @@ def main():
 
     if not os.path.isdir(MEM_HOME):
         log(f"MEM_HOME not found: {MEM_HOME}"); sys.exit(1)
+    if ENGINE not in ("claude", "codex"):
+        log(f"unknown DREAM_ENGINE {ENGINE!r} (use 'claude' or 'codex')"); sys.exit(1)
+    log(f"engine={ENGINE}  model={MODEL}")
 
     stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
     state = load_state()
@@ -531,10 +665,14 @@ def main():
     for partition, project_abs in read_manifest():
         if args.partition and partition != args.partition:
             continue
-        since_ts = since_override if since_override is not None else state.get(partition)
+        # Watermark is per (engine, partition): the two engines have separate
+        # transcript stores, so their last-run times must not clobber each other.
+        wm_key = f"{ENGINE}:{partition}"
+        since_ts = since_override if since_override is not None else \
+            state.get(wm_key, state.get(partition) if ENGINE == "claude" else None)
         run_partition(partition, project_abs, since_ts, stamp, args.dry_run)
         if not args.dry_run:
-            state[partition] = datetime.datetime.now().timestamp()
+            state[wm_key] = datetime.datetime.now().timestamp()
             save_state(state)
 
     log("done")

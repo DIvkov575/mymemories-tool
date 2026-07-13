@@ -9,6 +9,29 @@ It is the local, file-based analogue of Anthropic's Claude "Dreams" — an agent
 reflecting on past sessions to keep memory fresh instead of letting it decay —
 but **you decide when it runs**. There is no cron, no background job.
 
+## Engines: Claude Code or Codex
+
+Dream reads from either agent's transcripts, selected with `DREAM_ENGINE`
+(default `claude`). The two-pass design is identical; only the transcript
+source and the headless model call differ:
+
+| | `DREAM_ENGINE=claude` (default) | `DREAM_ENGINE=codex` |
+|---|---|---|
+| transcripts | `~/.claude/projects/<mangled-path>/*.jsonl` | `~/.codex/sessions/**/*.jsonl` |
+| partition match | per-project transcript dir (mangled abs path) | each rollout's declared `cwd` (matched to the partition's project path, incl. subdirs) |
+| propose model call | `claude -p … --output-format json` | `codex exec -o FILE --sandbox read-only` |
+| default `DREAM_MODEL` | `sonnet` | `openai.gpt-5.4` |
+
+The Codex propose pass runs under `--sandbox read-only` in a temp CWD, so the
+model still can't touch the filesystem — the propose/apply safety split holds on
+both engines. Watermarks in `.dream-state.json` are keyed per `(engine,
+partition)`, so running both engines never clobbers the other's last-run time.
+
+```bash
+DREAM_ENGINE=codex python3 dream.py --partition workplace --dry-run
+DREAM_ENGINE=codex python3 dream.py --partition workplace
+```
+
 ## Non-forcing by design
 
 The bar for saving anything is deliberately high. Most runs should save **little
@@ -84,12 +107,14 @@ DREAM_NO_PUSH=1 python3 dream.py --partition workplace      # commit locally, no
 
 | var | default | effect |
 |---|---|---|
-| `DREAM_MODEL` | `sonnet` | model alias for `claude -p` |
+| `DREAM_ENGINE` | `claude` | transcript source + model backend: `claude` or `codex` |
+| `DREAM_MODEL` | `sonnet` (claude) / `openai.gpt-5.4` (codex) | model for the propose call |
 | `DREAM_IMPORTANCE_FLOOR` | `6` | **lower** (e.g. 3–4) to save more; raise to save less |
 | `DREAM_MAX_DESTRUCTIVE` | `2` | max SUPERSEDE+MERGE per partition per run |
 | `DREAM_CORPUS_CHARS` | `80000` | cap on transcript chars fed per partition |
 | `DREAM_NO_PUSH` | unset | commit locally but don't `git push` |
-| `MEM_HOME` / `CLAUDE_HOME` | `~/workplace/mymemories` / `~/.claude` | locations |
+| `MEM_HOME` | `~/workplace/mymemories` | private memories repo |
+| `CLAUDE_HOME` / `CODEX_HOME` | `~/.claude` / `~/.codex` | transcript store per engine |
 
 ## Recovering a dreamed edit
 
