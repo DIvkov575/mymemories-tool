@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""dream.py — autonomous overnight memory consolidation for mymemories.
+"""dream.py — hand-invoked memory consolidation for mymemories.
 
-A "dreaming" pass: reflect on recent session transcripts and curate a project's
-memory partition — ADD / UPDATE / SUPERSEDE / MERGE / NOOP — the way Mem0 does
-(extract candidate facts -> compare against existing memories -> emit a typed
-edit op per candidate), with Generative-Agents-style evidence citations and the
-non-destructive safeguards Anthropic recommends for the file-based memory tool.
+A "dreaming" pass you run yourself: reflect on recent session transcripts and
+curate a project's memory partition — ADD / UPDATE / SUPERSEDE / MERGE / NOOP —
+the way Mem0 does (extract candidate facts -> compare against existing memories
+-> emit a typed edit op per candidate), with Generative-Agents-style evidence
+citations and the non-destructive safeguards Anthropic recommends for the
+file-based memory tool.
+
+It is deliberately NON-FORCING: the bar for saving anything is high, and a run
+that saves nothing (all NOOP) is the expected, correct outcome for most sessions.
+Raise DREAM_IMPORTANCE_FLOOR to make it stricter still.
 
 Two passes, deliberately separated:
   1. PROPOSE  — an LLM (headless `claude -p`) reads the corpus + the WHOLE
@@ -36,8 +41,8 @@ Env:
   MEM_HOME       private memories repo (default ~/workplace/mymemories)
   CLAUDE_HOME    Claude Code home (default ~/.claude) — for transcript lookup
   DREAM_MODEL    model alias for `claude -p` (default "sonnet")
-  DREAM_MAX_DESTRUCTIVE  per-run cap on SUPERSEDE+MERGE per partition (default 3)
-  DREAM_IMPORTANCE_FLOOR  drop ADDs below this importance 1-10 (default 3)
+  DREAM_MAX_DESTRUCTIVE  per-run cap on SUPERSEDE+MERGE per partition (default 2)
+  DREAM_IMPORTANCE_FLOOR  drop ADDs below this importance 1-10 (default 6; higher = stricter)
   DREAM_CORPUS_CHARS     cap on corpus chars per partition (default 80000)
   DREAM_NO_PUSH  if set, commit but do not `git push`
 """
@@ -47,8 +52,9 @@ HOME = os.path.expanduser("~")
 MEM_HOME = os.environ.get("MEM_HOME", os.path.join(HOME, "workplace", "mymemories"))
 CLAUDE_HOME = os.environ.get("CLAUDE_HOME", os.path.join(HOME, ".claude"))
 MODEL = os.environ.get("DREAM_MODEL", "sonnet")
-MAX_DESTRUCTIVE = int(os.environ.get("DREAM_MAX_DESTRUCTIVE", "3"))
-IMPORTANCE_FLOOR = int(os.environ.get("DREAM_IMPORTANCE_FLOOR", "3"))
+# Non-forcing defaults: high bar to save, low ceiling on destructive edits.
+MAX_DESTRUCTIVE = int(os.environ.get("DREAM_MAX_DESTRUCTIVE", "2"))
+IMPORTANCE_FLOOR = int(os.environ.get("DREAM_IMPORTANCE_FLOOR", "6"))
 CORPUS_CHARS = int(os.environ.get("DREAM_CORPUS_CHARS", "80000"))
 NO_PUSH = bool(os.environ.get("DREAM_NO_PUSH"))
 STATE_FILE = os.path.join(MEM_HOME, ".dream-state.json")
@@ -209,20 +215,28 @@ long-term memory: a set of atomic, one-fact-each markdown files.
 Emit a JSON list of edit operations. Follow the schema EXACTLY. Output ONLY the \
 JSON object, no prose, no markdown fences.
 
-## Operations (one per candidate fact; choose the single best op)
-- ADD       — a genuinely new, durable fact with no equivalent already stored.
-- UPDATE    — an existing fact needs augmenting; ONLY if your new content adds
-              information (never to reword or shorten).
-- SUPERSEDE — the transcript CONTRADICTS an existing fact; replace it. The old
-              file is soft-deleted (kept for rollback), a new one written.
-- MERGE     — two or more existing facts are near-duplicates; consolidate them.
-- NOOP      — nothing worth persisting (use freely; most sessions add 0-2 facts).
+## Your default answer is NOOP. Do not force memories.
+Most runs should produce an empty or near-empty operations list. Saving nothing
+is a SUCCESS, not a failure — never invent work to look useful. Only propose an
+edit when a fact clears a HIGH bar (see below). When in doubt, NOOP.
 
-## What makes a good memory (be STRICT — bloat is the main failure mode)
-- Durable and reusable across future sessions: user preferences, hard-won
-  project decisions, non-obvious constraints, corrections the user made.
-- NOT: one-off task status, things obvious from the code/git, restated context,
-  transient chatter, or anything already captured by an existing fact.
+## Operations (one per candidate fact; choose the single best op)
+- NOOP      — nothing clears the bar. This is the expected outcome; use it freely.
+- ADD       — a genuinely new, durable, reusable fact with no equivalent stored.
+- UPDATE    — an existing fact needs augmenting; ONLY if your new content adds
+              real information (never to reword, reformat, or shorten).
+- SUPERSEDE — the transcript CLEARLY CONTRADICTS an existing fact; replace it.
+              The old file is soft-deleted (kept for rollback), a new one written.
+- MERGE     — two or more existing facts are near-duplicates; consolidate them.
+
+## The bar for saving (be STRICT — unwanted bloat is worse than a missed fact)
+A fact is worth saving ONLY if ALL hold:
+1. Durable — still true and useful weeks from now (not this session's task state).
+2. Non-obvious — not derivable from the code, git history, or an existing memory.
+3. Reusable — it would change how a future session behaves.
+Good: a user preference/correction, a hard-won project decision, a non-obvious
+constraint. Bad (always NOOP): task status, what was done this session, restated
+context, transient chatter, anything an existing fact already covers.
 - One fact per memory. Compressed and technical. Lead with the fact. Commands
   verbatim in backticks. For feedback/project facts add a `**Why:**` line and a
   `**How to apply:**` line.
@@ -231,10 +245,10 @@ JSON object, no prose, no markdown fences.
 - Every ADD/UPDATE/SUPERSEDE/MERGE MUST cite `evidence` = the SESSION id it came
   from (see the ===== SESSION <id> ===== headers). Unsourced ops are rejected.
 - `importance` is 1-10 (Generative-Agents poignancy). Mundane=2, load-bearing
-  decision/correction=8+. ADDs below {floor} are dropped downstream, so don't
-  bother with trivia.
+  decision/correction=8+. ADDs below {floor} are dropped downstream — so if a
+  fact isn't clearly a {floor}+, emit NOOP instead of a low-importance ADD.
 - On contradiction, the MORE RECENT information wins (transcripts are newest-first).
-- Prefer NOOP over a weak ADD. A quiet night is a correct outcome.
+- A quiet run that saves nothing is the correct, expected outcome. Prefer NOOP.
 
 ## Existing memory in partition "{partition}"
 {existing}
