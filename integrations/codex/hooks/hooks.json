@@ -1,0 +1,15 @@
+{
+  "description": "mymemories: pull the central memories repo on session start (best-effort). Codex reliably reads the AGENTS.md reminder too; this hook is a belt-and-suspenders auto-pull where SessionStart hooks are supported.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CODEX_PLUGIN_ROOT:-$HOME/workplace/mymemories-tool/integrations/codex}/hooks/session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

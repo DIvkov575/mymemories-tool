@@ -23,3 +23,9 @@ done
 python3 "$REPO_ROOT/mymem" --provider codex install
 echo "Codex integration installed. Consolidate with:"
 echo "  python3 \"$REPO_ROOT/mymem\" --provider codex dream --partition <name> --dry-run"
+
+# Note: Codex auto-pull on session start is delivered via the AGENTS.md reminder
+# (Codex reliably reads AGENTS.md at start). hooks/hooks.json is a belt-and-
+# suspenders SessionStart pull for when mymemories is installed as a full Codex
+# plugin (registered via plugin.json's "hooks" field).
+echo "auto-pull reminder written into each linked project's AGENTS.md"

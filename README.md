@@ -11,16 +11,24 @@ hand-invoked **consolidation ("dream")** pass.
 ## Architecture
 
 ```
-memcore/            neutral core — knows nothing about any specific agent
+memcore/            neutral core
   store.py          MEM_HOME, manifest, partitions, fact read/write, MEMORY.md, git
-  providers.py      the ONLY harness-specific code: Claude + Codex adapters
-  dream.py          two-pass, non-forcing consolidation (provider-parameterized)
-mymem               one CLI: `mymem dream|link|install|providers` (+ --provider)
+  dreamlib/         VENDORED single-source reflection engine + agent backends
+                    (shared with the standalone `dreams` tool: github.com/DIvkov575/dreams)
+  providers.py      thin adapters: partition transcripts + harness memory exposure
+  dream.py          thin adapter: partition <-> dreamlib.engine (propose/apply)
+  store.py, codex_native.py, codex_import.py   mymemories-specific layer
+mymem               one CLI: dream | save | codex-import | link | install | providers
 integrations/
-  claude/           Claude Code plugin: /memorize, SessionStart hook, dream skill
-  codex/            Codex skill + install.sh
+  claude/           Claude Code plugin: /memorize (mymem save), SessionStart pull hook, dream skill
+  codex/            Codex memorize + memory-consolidation skills, AGENTS.md pull+save reminder, hooks.json
 format.md · DREAM.md
 ```
+
+The reflection engine and headless-LLM/transcript backends are **single-sourced**
+in `memcore/dreamlib` (vendored from the [`dreams`](https://github.com/DIvkov575/dreams)
+tool). `memcore` adds only the mymemories store/partition/manifest layer on top,
+so there is exactly one engine implementation.
 
 A **provider** abstracts the only three things that differ between agents:
 
