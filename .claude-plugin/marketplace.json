@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "mymemories",
+  "description": "Provider-agnostic persistent per-project memory for coding agents — central sync, lazy load, and hand-invoked consolidation.",
+  "owner": {
+    "name": "DIvkov575"
+  },
+  "plugins": [
+    {
+      "name": "mymemories",
+      "description": "Provider-agnostic persistent per-project memory for coding agents: central git sync, lazy load, a /memorize command, and a hand-invoked memory-consolidation ('dream') skill. Works with Claude Code and Codex.",
+      "author": { "name": "DIvkov575" },
+      "category": "productivity",
+      "source": {
+        "source": "github",
+        "repo": "DIvkov575/mymemories-tool",
+        "path": "integrations/claude"
+      },
+      "homepage": "https://github.com/DIvkov575/mymemories-tool"
+    }
+  ]
+}
