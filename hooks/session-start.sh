@@ -2,10 +2,9 @@
 # Claude Code SessionStart hook. Best-effort, never blocks or fails the session:
 #   1. Link this project's memory partition into the central repo (via mymem).
 #   2. Pull the central repo down (git pull --ff-only), backgrounded.
-# The repo ships memcore + mymem two levels up from this hook.
+# The repo (memcore + mymem) IS the plugin root.
 set -uo pipefail
-PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-REPO_ROOT="$(cd "$PLUGIN_ROOT/../.." && pwd)"   # integrations/claude -> repo root
+REPO_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 MEM_HOME="${MEM_HOME:-$HOME/workplace/mymemories}"
 
 payload="$(cat)"

@@ -29,19 +29,18 @@ regenerates `MEMORY.md`, commits + pushes. The model plans; code executes.
 
 ## Steps
 
-Let `REPO` be the plugin repo root (two levels up from `${CLAUDE_PLUGIN_ROOT}`,
-i.e. `${CLAUDE_PLUGIN_ROOT}/../..`).
+`${CLAUDE_PLUGIN_ROOT}` is the repo root (where `mymem` lives).
 
 1. **Always dry-run first:**
    ```bash
-   python3 "$REPO/mymem" --provider claude dream --partition <partition> --dry-run
+   python3 "${CLAUDE_PLUGIN_ROOT}/mymem" --provider claude dream --partition <partition> --dry-run
    ```
    Omit `--partition` for all partitions; add `--since YYYY-MM-DD` to widen the window.
 2. **Show the user** the op count and each op's type/slug/importance. If it's all
    NOOP, say so plainly — nothing durable to save. Do not force ADDs.
 3. **Apply only if the user is happy:**
    ```bash
-   python3 "$REPO/mymem" --provider claude dream --partition <partition>
+   python3 "${CLAUDE_PLUGIN_ROOT}/mymem" --provider claude dream --partition <partition>
    ```
    Prefix `DREAM_NO_PUSH=1` to commit locally without pushing.
 4. **Report** what was committed. Each run is one git commit scoped to the
