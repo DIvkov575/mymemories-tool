@@ -1,13 +1,20 @@
 # Dream — hand-invoked memory consolidation
 
-`dream.py` is an optional, **manually invoked** add-on to mymemories. When you
-run it, it reflects on recent session transcripts and curates a project's memory
-partition — adding durable new facts, augmenting existing ones, superseding facts
-the transcript contradicts, and merging duplicates.
+`mymem dream` is a **manually invoked**, **provider-agnostic** consolidation pass.
+When you run it, it reflects on recent session transcripts and curates a project's
+memory partition — adding durable new facts, augmenting existing ones, superseding
+facts the transcript contradicts, and merging duplicates.
 
 It is the local, file-based analogue of Anthropic's Claude "Dreams" — an agent
 reflecting on past sessions to keep memory fresh instead of letting it decay —
-but **you decide when it runs**. There is no cron, no background job.
+but **you decide when it runs** (there is no cron), and it works across coding
+agents: the same core runs against Claude Code or Codex transcripts, selected by
+`--provider` (auto-detected by default).
+
+```bash
+python3 mymem dream --partition <name> --dry-run              # auto-detect provider
+python3 mymem --provider codex dream --partition <name>       # explicit provider
+```
 
 ## Non-forcing by design
 
@@ -68,16 +75,19 @@ Grounded in the published consolidation literature, adapted to a small file stor
 Always dry-run first to see what it *would* do:
 
 ```bash
-python3 dream.py --partition workplace --dry-run   # propose only; writes nothing
+python3 mymem dream --partition workplace --dry-run   # propose only; writes nothing
 ```
 
 Then apply when you're happy:
 
 ```bash
-python3 dream.py --partition workplace             # apply + commit + push
-python3 dream.py                                   # all partitions
-python3 dream.py --partition workplace --since 2026-07-01   # override watermark
-DREAM_NO_PUSH=1 python3 dream.py --partition workplace      # commit locally, no push
+python3 mymem dream --partition workplace             # apply + commit + push
+python3 mymem dream                                   # all partitions
+python3 mymem dream --partition workplace --since 2026-07-01   # override watermark
+DREAM_NO_PUSH=1 python3 mymem dream --partition workplace      # commit locally, no push
+
+# pick a provider explicitly (default: auto-detect claude then codex)
+python3 mymem --provider codex dream --partition workplace --dry-run
 ```
 
 ## Tuning (env vars)
