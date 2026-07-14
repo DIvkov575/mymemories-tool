@@ -79,6 +79,40 @@ def cmd_codex_import(args, provider):
     print("[mymem] codex-import done")
 
 
+def cmd_save(args, provider):
+    """Write one fact into a partition and sync (pull -> write -> commit -> push).
+    Deterministic: no LLM. Used by /memorize-style skills on any provider."""
+    if not os.path.isdir(store.MEM_HOME):
+        sys.exit(f"MEM_HOME not found: {store.MEM_HOME}")
+    if not store.safe_slug(args.slug):
+        sys.exit(f"unsafe slug: {args.slug!r} (use lowercase kebab/snake)")
+    # resolve partition: explicit, else by --project, else cwd
+    part = args.partition
+    if not part:
+        proj = os.path.abspath(os.path.expanduser(args.project)) if args.project else os.getcwd()
+        part = _partition_for_project(proj)
+    if not part:
+        sys.exit("could not resolve a partition; pass --partition or --project")
+    if not os.path.isdir(store.partition_dir(part)):
+        sys.exit(f"partition {part!r} has no dir in {store.MEM_HOME}")
+    # read content: --content, else stdin
+    content = args.content if args.content is not None else sys.stdin.read()
+    if not content.strip():
+        sys.exit("empty content (pass --content or pipe via stdin)")
+    if args.dry_run:
+        print(f"[mymem] DRY-RUN: would save {part}/{args.slug}.md (no write, no commit)")
+        return
+    if not args.no_pull:
+        store.git_pull()
+    store.write_fact(part, args.slug, args.type, args.description, content,
+                     args.evidence or "manual", origin=args.origin)
+    store.regen_memory_index(part)
+    msg = f"mem: {args.slug} ({part})"
+    committed = store.commit_partition(part, msg, push=not args.no_push)
+    print(f"[mymem] saved {part}/{args.slug}.md" + (" + pushed" if committed and not args.no_push
+          else " + committed" if committed else " (no git change)"))
+
+
 def cmd_link(args, provider):
     if args.project:
         project = os.path.abspath(os.path.expanduser(args.project))
@@ -136,6 +170,20 @@ def main():
     ci.add_argument("--model", help="model alias for the headless judging call")
     ci.add_argument("--no-push", action="store_true")
     ci.set_defaults(func=cmd_codex_import)
+
+    sv = sub.add_parser("save", help="write one fact into a partition and sync (no LLM)")
+    sv.add_argument("slug", help="kebab-case memory slug")
+    sv.add_argument("--content", help="fact body (else read from stdin)")
+    sv.add_argument("--description", default="", help="one-line index hook")
+    sv.add_argument("--type", default="reference", choices=["user", "feedback", "project", "reference"])
+    sv.add_argument("--partition", help="target partition (else resolved from --project/cwd)")
+    sv.add_argument("--project", help="resolve partition from this project path")
+    sv.add_argument("--evidence", help="session id or source (default: manual)")
+    sv.add_argument("--origin", default="memorize")
+    sv.add_argument("--dry-run", action="store_true")
+    sv.add_argument("--no-pull", action="store_true", help="skip git pull before writing")
+    sv.add_argument("--no-push", action="store_true", help="commit locally but don't push")
+    sv.set_defaults(func=cmd_save)
 
     l = sub.add_parser("link", help="expose a partition so the harness auto-loads it")
     l.add_argument("--partition")

@@ -239,15 +239,30 @@ class CodexProvider(Provider):
         agents = os.path.join(project_abs, "AGENTS.md")
         target = store.partition_dir(partition)
         marker = "<!-- mymemories -->"
+        end_marker = "<!-- /mymemories -->"
         block = (f"{marker}\n## Project memory\n"
                  f"Persistent memory for this project lives at `{target}`. "
-                 f"Read `{target}/MEMORY.md` for the index; load individual facts on demand.\n")
-        existing = ""
-        if os.path.exists(agents):
-            existing = open(agents, encoding="utf-8").read()
-            if marker in existing:
-                return agents  # already pointed
-        # Create AGENTS.md if absent, else append the pointer block.
+                 f"Read `{target}/MEMORY.md` for the index; load individual facts on demand.\n\n"
+                 f"When a durable, reusable fact emerges (a user preference or correction, "
+                 f"a hard-won decision, a non-obvious constraint), save it and sync with:\n"
+                 f"`python3 ~/workplace/mymemories-tool/mymem --provider codex save <slug> "
+                 f"--type feedback --description \"<hook>\" --content \"<fact>\"`\n"
+                 f"Be selective \u2014 do not save task status or restated context.\n"
+                 f"{end_marker}\n")
+        existing = open(agents, encoding="utf-8").read() if os.path.exists(agents) else ""
+        # Refresh in place if a (possibly older) block is already present.
+        if marker in existing:
+            import re as _re
+            if end_marker in existing:
+                new_text = _re.sub(_re.escape(marker) + r".*?" + _re.escape(end_marker) + r"\n?",
+                                   block, existing, flags=_re.S)
+            else:
+                # legacy block had no end marker: replace from marker to EOF/next blank-line stanza
+                new_text = existing[:existing.index(marker)] + block
+            if new_text != existing:
+                open(agents, "w", encoding="utf-8").write(new_text)
+            return agents
+        # Otherwise append (creating AGENTS.md if absent).
         with open(agents, "a", encoding="utf-8") as f:
             if existing and not existing.endswith("\n"):
                 f.write("\n")

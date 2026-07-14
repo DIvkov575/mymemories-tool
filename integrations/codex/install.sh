@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install the mymemories Codex integration:
-#   1. Copy the memory-consolidation skill into ~/.codex/skills/
+#   1. Copy the memory-consolidation + memorize skills into ~/.codex/skills/
 #   2. Link every manifest partition into its project's AGENTS.md (mymem install)
 # Idempotent. Run once per device (after cloning the memories repo to $MEM_HOME).
 #
@@ -11,11 +11,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"        # integrations/codex -> repo root
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 
-# 1. Skill
-SKILL_DST="$CODEX_HOME/skills/memory-consolidation"
-mkdir -p "$SKILL_DST"
-cp "$HERE/skills/memory-consolidation/SKILL.md" "$SKILL_DST/SKILL.md"
-echo "installed skill -> $SKILL_DST"
+# 1. Skills
+for s in memory-consolidation memorize; do
+  dst="$CODEX_HOME/skills/$s"
+  mkdir -p "$dst"
+  cp "$HERE/skills/$s/SKILL.md" "$dst/SKILL.md"
+  echo "installed skill -> $dst"
+done
 
 # 2. Point each partition at its project's AGENTS.md
 python3 "$REPO_ROOT/mymem" --provider codex install
