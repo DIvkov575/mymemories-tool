@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""mymem — one provider-agnostic CLI for the mymemories system.
+
+  mymem dream   [--partition P] [--provider claude|codex] [--dry-run] [--since D] [--no-push]
+  mymem link    [--partition P | --project PATH] [--provider ...]   # expose a partition to a harness
+  mymem install [--provider ...]                                    # link every partition in the manifest
+  mymem providers                                                   # list detected providers
+
+Provider is auto-detected (claude, then codex) unless --provider / MYMEM_PROVIDER
+is given. All memory lives in $MEM_HOME (default ~/workplace/mymemories).
+"""
+import sys, os, argparse, datetime, json
+
+# Make `memcore` importable whether run from the repo or an integration copy.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from memcore import store, dream as dreamer, providers  # noqa: E402
+
+STATE_FILE = os.path.join(store.MEM_HOME, ".dream-state.json")
+
+
+def _load_state():
+    try:
+        return json.load(open(STATE_FILE))
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def _save_state(s):
+    json.dump(s, open(STATE_FILE, "w"), indent=2)
+
+
+def _now():
+    return datetime.datetime.now().timestamp()
+
+
+def _stamp():
+    return datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+
+
+def _partition_for_project(project_abs):
+    for part, proj in store.read_manifest():
+        if os.path.realpath(proj) == os.path.realpath(project_abs):
+            return part
+    return None
+
+
+def cmd_dream(args, provider):
+    if not os.path.isdir(store.MEM_HOME):
+        sys.exit(f"MEM_HOME not found: {store.MEM_HOME}")
+    stamp = _stamp()
+    state = _load_state()
+    since_override = (datetime.datetime.strptime(args.since, "%Y-%m-%d").timestamp()
+                      if args.since else None)
+    if not args.dry_run:
+        store.git_pull()
+    for partition, project_abs in store.read_manifest():
+        if args.partition and partition != args.partition:
+            continue
+        since_ts = since_override if since_override is not None else state.get(partition)
+        dreamer.consolidate(provider, partition, project_abs, since_ts, stamp,
+                            args.dry_run, model=args.model, push=not args.no_push)
+        if not args.dry_run:
+            state[partition] = _now()
+            _save_state(state)
+    print("[mymem] dream done")
+
+
+def cmd_link(args, provider):
+    if args.project:
+        project = os.path.abspath(os.path.expanduser(args.project))
+        part = _partition_for_project(project) or args.partition
+        if not part:
+            # Silent no-op: the SessionStart hook calls this on every project,
+            # most of which have no partition. Not an error.
+            return
+        print("linked:", provider.link(part, project))
+        return
+    # link a named partition using its manifest project path
+    for partition, project_abs in store.read_manifest():
+        if args.partition and partition != args.partition:
+            continue
+        print(f"linked {partition}:", provider.link(partition, project_abs))
+
+
+def cmd_install(args, provider):
+    n = 0
+    for partition, project_abs in store.read_manifest():
+        try:
+            provider.link(partition, project_abs)
+            print(f"linked {partition} -> {project_abs}")
+            n += 1
+        except OSError as e:
+            print(f"skip {partition}: {e}")
+    print(f"[mymem] linked {n} partition(s) for provider {provider.name}")
+
+
+def cmd_providers(_args, _provider):
+    for name, cls in providers.PROVIDERS.items():
+        p = cls()
+        print(f"{name:8} {'available' if p.available() else 'not detected'}")
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="mymem", description="Provider-agnostic memory for coding agents.")
+    ap.add_argument("--provider", choices=list(providers.PROVIDERS), help="override auto-detection")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    d = sub.add_parser("dream", help="consolidate memory from recent transcripts")
+    d.add_argument("--partition")
+    d.add_argument("--dry-run", action="store_true")
+    d.add_argument("--since", help="YYYY-MM-DD; override the per-partition watermark")
+    d.add_argument("--model", help="model alias for the provider's headless call")
+    d.add_argument("--no-push", action="store_true", help="commit locally but don't push")
+    d.set_defaults(func=cmd_dream)
+
+    l = sub.add_parser("link", help="expose a partition so the harness auto-loads it")
+    l.add_argument("--partition")
+    l.add_argument("--project", help="link the partition for this project path")
+    l.set_defaults(func=cmd_link)
+
+    i = sub.add_parser("install", help="link every partition in the manifest")
+    i.set_defaults(func=cmd_install)
+
+    p = sub.add_parser("providers", help="list detected providers")
+    p.set_defaults(func=cmd_providers)
+
+    args = ap.parse_args()
+    provider = providers.get_provider(args.provider)
+    args.func(args, provider)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,93 +1,87 @@
 # mymemories-tool
 
-A small, self-contained toolkit that gives **Claude Code agents persistent,
-per-project memory** backed by one central git repo. This is the **public
-tooling**; your actual memories live in a separate **private** repo that this
-tool reads and writes.
+Provider-agnostic **persistent, per-project memory** for coding agents, backed by
+one central git repo. Works with **Claude Code** and **Codex** from the same core.
+This is the public tooling; your actual memories live in a separate private repo
+this tool reads and writes.
 
-The core does exactly two things — **central sync** and **lazy load** — and
-nothing else. No semantic index, no link linter, no cross-partition registry.
+Two things, and nothing else: **central sync** + **lazy load** — plus an optional,
+hand-invoked **consolidation ("dream")** pass.
 
-An optional add-on, **Dream** (`dream.py`, see [DREAM.md](DREAM.md)), does
-hand-invoked consolidation: when you run it, it reflects on session transcripts
-and curates a partition (add / update / supersede / merge). It's deliberately
-non-forcing — most runs save little or nothing. Run `python3 dream.py --dry-run`
-or ignore it entirely.
+## Architecture
+
+```
+memcore/            neutral core — knows nothing about any specific agent
+  store.py          MEM_HOME, manifest, partitions, fact read/write, MEMORY.md, git
+  providers.py      the ONLY harness-specific code: Claude + Codex adapters
+  dream.py          two-pass, non-forcing consolidation (provider-parameterized)
+mymem               one CLI: `mymem dream|link|install|providers` (+ --provider)
+integrations/
+  claude/           Claude Code plugin: /memorize, SessionStart hook, dream skill
+  codex/            Codex skill + install.sh
+format.md · DREAM.md
+```
+
+A **provider** abstracts the only three things that differ between agents:
+
+| | Claude Code | Codex |
+|---|---|---|
+| **transcripts** | `~/.claude/projects/<mangle>/*.jsonl` | `~/.codex/sessions/**/rollout-*.jsonl` (filtered by cwd) |
+| **headless LLM** | `claude -p --output-format json` | `codex exec --skip-git-repo-check` |
+| **memory exposure** | symlink partition into `projects/<mangle>/memory` | pointer appended to the project's `AGENTS.md` |
+
+Everything else — the store, the dreaming algorithm, every safety guard — is
+shared. Adding another agent means adding one `Provider` subclass.
 
 ## What it does
 
-Claude Code auto-loads agent memory from `~/.claude/projects/<mangled-cwd>/memory/`,
-one silo per project, with no central location and no version control. This tool
-inverts that: all memories live in one private git repo, and each project's
-partition is *symlinked* back into the path the harness loads from.
+- **Central sync** — every partition is a subdir of one private git repo. On
+  session start the partition is linked in and the repo is pulled
+  (`git pull --ff-only`, backgrounded); `/memorize` commits and pushes.
+- **Lazy load** — only the current project's `MEMORY.md` index is auto-loaded;
+  leaf facts are read on demand.
+- **Consolidation ("dream")** — `mymem dream` reflects on recent transcripts and
+  curates a partition (add / update / supersede / merge). Non-forcing: most runs
+  save little or nothing. See [DREAM.md](DREAM.md).
 
-- **Central sync** — every partition is a subdir of one private git repo. The
-  SessionStart hook pulls it down (`git pull --ff-only`, backgrounded); `/memorize`
-  commits and pushes it up. Same memories on every device.
-- **Lazy load** — opening project X symlinks in partition X, and the harness
-  auto-loads only that partition's `MEMORY.md` index. Leaf facts are read on
-  demand; other projects' partitions aren't loaded at all (but stay `Read`/`grep`-able).
-- **Auto-symlink** — the SessionStart hook links a project the first time it's
-  opened with memories, so new projects need no manual step.
+## Install
 
-## Tool vs. memories — the split
-
-| | repo | visibility | holds |
-|---|---|---|---|
-| **Tool** | `mymemories-tool` (this) | public | scripts, hook, command — zero personal data |
-| **Memories** | `mymemories` | private | your partitions + `manifest.tsv` |
-
-Every script resolves two locations:
-- `TOOL_DIR` — where the script lives (self-located; clone anywhere).
-- `MEM_HOME` — the private memories repo. Defaults to `~/workplace/mymemories`;
-  override with the `MEM_HOME` environment variable.
-
-## Files
-
-```
-install.sh / uninstall.sh  create / remove the partition symlinks
-install-hook.sh            register SessionStart hook + install /memorize command
-autolink.sh                ensure one project is partitioned + symlinked
-hooks/session-start.sh     SessionStart hook -> autolink + git pull --ff-only
-commands/memorize.md       /memorize (copied to ~/.claude/commands/)
-format.md                  compressed/technical memory format convention
-
-# optional: hand-invoked consolidation (see DREAM.md)
-dream.py                   the two-pass propose/apply consolidator
-DREAM.md                   method, guards, tuning, recovery
-```
-
-## Install on a new device
+Clone the private memories repo (default `~/workplace/mymemories`; override with
+`MEM_HOME`), then:
 
 ```bash
-# 1. the private memories repo (must be at MEM_HOME; default path shown)
-git clone <your-private-memories-remote> ~/workplace/mymemories
-
-# 2. this public tool (clone anywhere)
-git clone https://github.com/DIvkov575/mymemories-tool ~/workplace/mymemories-tool
-cd ~/workplace/mymemories-tool
-
-./install.sh         # symlink partitions into ~/.claude/projects
-./install-hook.sh    # register SessionStart hook + install /memorize
+python3 mymem providers          # see which agents are detected
+python3 mymem install            # link every partition for all available agents
 ```
 
-If your memories repo is somewhere else, set `MEM_HOME` (e.g.
-`MEM_HOME=~/mem ./install.sh`) for every command, or edit the default in the
-scripts.
+**Claude Code** — install the plugin (`integrations/claude/`) so `/memorize`, the
+SessionStart hook, and the consolidation skill load:
+```
+/plugin marketplace add DIvkov575/mymemories-tool
+/plugin install mymemories@mymemories
+```
 
-## Add a project
+**Codex** — run the Codex integration installer:
+```bash
+integrations/codex/install.sh    # copies the skill into ~/.codex/skills + links partitions
+```
 
-1. In the memories repo: `mkdir <partition>` and add memory `.md` files (one
-   fact each, with a `name:` slug in frontmatter — see `format.md`).
-2. Add a line to `<MEM_HOME>/manifest.tsv`: `<partition><TAB><path-relative-to-$HOME>`.
-3. From the tool: `./install.sh`, then commit + push the memories repo.
+## Consolidate
 
-Or just open the project and let the SessionStart hook auto-link it (if it
-already has memories), then `/memorize`.
+Always dry-run first:
 
-## Conventions
+```bash
+python3 mymem dream --partition <name> --dry-run     # auto-detected provider
+python3 mymem --provider codex dream --partition <name> --dry-run
+```
 
-- **One fact per file.** Frontmatter `name:` is the slug (see `format.md`).
-- **Write liberally; load lazily.** Only `MEMORY.md` indexes auto-load. Leaf
-  facts are read on demand. Overwrite/delete stale files — don't accumulate cruft.
-- `cozempic_digest.md` is plugin-managed and gitignored — never a real memory.
+Apply by dropping `--dry-run`. Method, guards, and tuning are in [DREAM.md](DREAM.md).
+
+## The memory format
+
+One fact per file, frontmatter (`name`, `description`, `type`); only each
+partition's `MEMORY.md` index auto-loads. See [format.md](format.md).
+
+## License
+
+MIT.

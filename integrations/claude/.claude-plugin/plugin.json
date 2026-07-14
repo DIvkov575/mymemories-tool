@@ -1,0 +1,12 @@
+{
+  "name": "mymemories",
+  "description": "Provider-agnostic persistent per-project memory for coding agents: central git sync, lazy load, a /memorize command, and a hand-invoked memory-consolidation ('dream') skill. Works with Claude Code and Codex.",
+  "version": "2.0.0",
+  "author": {
+    "name": "DIvkov575"
+  },
+  "homepage": "https://github.com/DIvkov575/mymemories-tool",
+  "repository": "https://github.com/DIvkov575/mymemories-tool",
+  "license": "MIT",
+  "keywords": ["memory", "persistence", "consolidation", "git", "context", "provider-agnostic"]
+}

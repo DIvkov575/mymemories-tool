@@ -1,0 +1,16 @@
+{
+  "description": "mymemories: on session start, link this project's memory partition and pull the central repo (best-effort, backgrounded).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
