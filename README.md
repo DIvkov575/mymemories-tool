@@ -77,6 +77,25 @@ python3 mymem --provider codex dream --partition <name> --dry-run
 
 Apply by dropping `--dry-run`. Method, guards, and tuning are in [DREAM.md](DREAM.md).
 
+## Import Codex's native memories
+
+Codex has its own memory system (`~/.codex/memories_1.sqlite` per-session
+extractions + `~/.codex/memories/*.md` consolidated docs). `mymem codex-import`
+reads it (never writes to it), routes each memory to a partition by the
+originating session's cwd (unroutable/global memories go to a `codex-native`
+partition), and runs the batch through the SAME non-forcing consolidator — so
+imported items are deduped against existing facts, quality-gated, and written in
+the shared markdown format both agents lazy-load.
+
+```bash
+python3 mymem codex-import --dry-run              # preview; writes nothing
+python3 mymem codex-import                        # import + commit + push
+python3 mymem codex-import --partition aws-billing --dry-run
+```
+
+Imported facts carry `origin: dream` with the Codex thread id as evidence, and
+lazy-load like any other memory (only `MEMORY.md` auto-loads).
+
 ## The memory format
 
 One fact per file, frontmatter (`name`, `description`, `type`); only each

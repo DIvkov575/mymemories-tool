@@ -13,7 +13,7 @@ import sys, os, argparse, datetime, json
 
 # Make `memcore` importable whether run from the repo or an integration copy.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from memcore import store, dream as dreamer, providers  # noqa: E402
+from memcore import store, dream as dreamer, providers, codex_import  # noqa: E402
 
 STATE_FILE = os.path.join(store.MEM_HOME, ".dream-state.json")
 
@@ -63,6 +63,20 @@ def cmd_dream(args, provider):
             state[partition] = _now()
             _save_state(state)
     print("[mymem] dream done")
+
+
+def cmd_codex_import(args, provider):
+    """Import Codex's native memories into the shared store (via the consolidator)."""
+    if not os.path.isdir(store.MEM_HOME):
+        sys.exit(f"MEM_HOME not found: {store.MEM_HOME}")
+    stamp = _stamp()
+    if not args.dry_run:
+        store.git_pull()
+    # Always use the Codex provider's model for judging Codex-sourced memories,
+    # unless the user forced a provider explicitly.
+    codex_import.run(provider, stamp, args.dry_run, model=args.model,
+                     push=not args.no_push, only_partition=args.partition)
+    print("[mymem] codex-import done")
 
 
 def cmd_link(args, provider):
@@ -115,6 +129,13 @@ def main():
     d.add_argument("--model", help="model alias for the provider's headless call")
     d.add_argument("--no-push", action="store_true", help="commit locally but don't push")
     d.set_defaults(func=cmd_dream)
+
+    ci = sub.add_parser("codex-import", help="import Codex's native memories into the shared store")
+    ci.add_argument("--partition", help="only this partition")
+    ci.add_argument("--dry-run", action="store_true")
+    ci.add_argument("--model", help="model alias for the headless judging call")
+    ci.add_argument("--no-push", action="store_true")
+    ci.set_defaults(func=cmd_codex_import)
 
     l = sub.add_parser("link", help="expose a partition so the harness auto-loads it")
     l.add_argument("--partition")
