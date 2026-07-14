@@ -83,15 +83,18 @@ def cmd_link(args, provider):
 
 
 def cmd_install(args, provider):
-    n = 0
+    n = skipped = 0
     for partition, project_abs in store.read_manifest():
         try:
-            provider.link(partition, project_abs)
-            print(f"linked {partition} -> {project_abs}")
-            n += 1
+            where = provider.link(partition, project_abs)
         except OSError as e:
-            print(f"skip {partition}: {e}")
-    print(f"[mymem] linked {n} partition(s) for provider {provider.name}")
+            print(f"skip {partition}: {e}"); skipped += 1; continue
+        if where:
+            print(f"linked {partition} -> {where}"); n += 1
+        else:
+            print(f"skip {partition}: project dir not present"); skipped += 1
+    print(f"[mymem] linked {n} partition(s) for provider {provider.name}"
+          + (f" ({skipped} skipped)" if skipped else ""))
 
 
 def cmd_providers(_args, _provider):

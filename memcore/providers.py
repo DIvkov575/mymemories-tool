@@ -233,6 +233,9 @@ class CodexProvider(Provider):
     def link(self, partition, project_abs):
         # Codex has no per-project symlinked memory dir; instead drop a pointer
         # into the project's AGENTS.md so the agent reads the partition on load.
+        # Skip cleanly if the project directory doesn't exist on this machine.
+        if not os.path.isdir(project_abs):
+            return None
         agents = os.path.join(project_abs, "AGENTS.md")
         target = store.partition_dir(partition)
         marker = "<!-- mymemories -->"
@@ -244,10 +247,11 @@ class CodexProvider(Provider):
             existing = open(agents, encoding="utf-8").read()
             if marker in existing:
                 return agents  # already pointed
+        # Create AGENTS.md if absent, else append the pointer block.
         with open(agents, "a", encoding="utf-8") as f:
             if existing and not existing.endswith("\n"):
                 f.write("\n")
-            f.write("\n" + block)
+            f.write(("\n" if existing else "") + block)
         return agents
 
 
